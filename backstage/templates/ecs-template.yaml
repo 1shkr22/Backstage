@@ -3,17 +3,41 @@ kind: Template
 metadata:
   name: aviso-ecs-service-template
   title: Aviso ECS Service Template
-  description: Creates a new ECS service with automated deployment to AWS ECR and ECS
+  description: Create or deploy ECS services via Backstage
   tags:
     - aws
     - ecs
     - docker
-    - nodejs
+    - github-actions
+
 spec:
   owner: team:platform
   type: service
 
+  ############################
+  # PARAMETERS
+  ############################
   parameters:
+
+    # NEW — SERVICE MODE
+    - title: Service Mode
+      required:
+        - serviceMode
+      properties:
+        serviceMode:
+          title: What do you want to do?
+          type: string
+          default: create
+          enum:
+            - create
+            - deploy
+          enumNames:
+            - Create a new ECS service
+            - Deploy an existing ECS service
+
+    # -------------------------
+    # SERVICE INFORMATION
+    # -------------------------
     - title: Service Information
       required:
         - name
@@ -23,23 +47,22 @@ spec:
         name:
           title: Service Name
           type: string
-          description: Unique name of the service (lowercase, hyphens allowed)
           pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
-          ui:autofocus: true
         description:
           title: Description
           type: string
-          description: Brief description of the service
         owner:
           title: Owner
           type: string
-          description: Owner email or team name (e.g., vansh.kumar@aviso.com or team:platform)
           ui:field: OwnerPicker
           ui:options:
             allowedKinds:
               - user
               - group
 
+    # -------------------------
+    # REPOSITORY CONFIG
+    # -------------------------
     - title: Repository Configuration
       required:
         - repoUrl
@@ -55,21 +78,14 @@ spec:
               - repo
               - workflow
 
+    # -------------------------
+    # ECS CONFIG (NEW SERVICE)
+    # -------------------------
     - title: AWS ECS Configuration
-      required:
-        - awsRegion
-        - ecrRepository
-        - ecsCluster
-        - ecsServiceName
-        - taskDefinitionFamily
-        - containerPort
-        - cpu
-        - memory
       properties:
         awsRegion:
           title: AWS Region
           type: string
-          description: AWS region where ECS cluster is located (e.g., us-east-1)
           default: us-east-1
           enum:
             - us-east-1
@@ -79,126 +95,84 @@ spec:
             - eu-west-1
             - eu-central-1
             - ap-south-1
-          enumNames:
-            - US East (N. Virginia)
-            - US East (Ohio)
-            - US West (N. California)
-            - US West (Oregon)
-            - Europe (Ireland)
-            - Europe (Frankfurt)
-            - Asia Pacific (Mumbai)
+
         ecrRepository:
           title: ECR Repository Name
           type: string
-          description: Name of the ECR repository (will be created if it doesn't exist)
+
         ecsCluster:
           title: ECS Cluster Name
           type: string
-          description: Name of the ECS cluster where the service will be deployed
+
         ecsServiceName:
           title: ECS Service Name
           type: string
-          description: Name of the ECS service
+
         taskDefinitionFamily:
-          title: Task Definition Family Name
+          title: Task Definition Family
           type: string
-          description: Family name for the task definition
+
         containerPort:
           title: Container Port
           type: integer
-          description: Port on which the container listens
           default: 3000
-        healthCheckPath:
-          title: Health Check Path
-          type: string
-          description: Health check endpoint path (e.g., /health, /healthz)
-          default: /health
-        serviceLogGroup:
-          title: Service Log Group
-          type: string
-          description: CloudWatch log group name (e.g., /ecs/service-name)
-          default: /ecs/service-name
+
         cpu:
           title: CPU Units
           type: integer
-          description: CPU units for the task (256 = 0.25 vCPU, 512 = 0.5 vCPU, 1024 = 1 vCPU)
           default: 256
-          enum:
-            - 256
-            - 512
-            - 1024
-            - 2048
-            - 4096
-          enumNames:
-            - 0.25 vCPU
-            - 0.5 vCPU
-            - 1 vCPU
-            - 2 vCPU
-            - 4 vCPU
+
         memory:
           title: Memory (MB)
           type: integer
-          description: Memory in MB for the task
           default: 512
-          enum:
-            - 512
-            - 1024
-            - 2048
-            - 4096
-            - 8192
-          enumNames:
-            - 512 MB
-            - 1 GB
-            - 2 GB
-            - 4 GB
-            - 8 GB
 
-    - title: Network Configuration
-      required:
-        - vpcId
-        - subnetIds
-        - securityGroupIds
-      properties:
-        vpcId:
-          title: VPC ID
-          type: string
-          description: VPC ID where the service will be deployed
-        subnetIds:
-          title: Subnet IDs
-          type: array
-          description: Comma-separated list of subnet IDs (at least 2 for high availability)
-          items:
-            type: string
-          ui:options:
-            rows: 3
-        securityGroupIds:
-          title: Security Group IDs
-          type: array
-          description: Comma-separated list of security group IDs
-          items:
-            type: string
-          ui:options:
-            rows: 2
-
+    # -------------------------
+    # ENVIRONMENT CONFIG
+    # -------------------------
     - title: Environment Configuration
       properties:
         environment:
           title: Environment
           type: string
-          description: Deployment environment
           default: dev
           enum:
             - dev
             - staging
             - prod
-        githubEnvBranch:
-          title: GitHub Environment Branch
-          type: string
-          description: Branch name that triggers deployment (e.g., env-dev, env-staging)
-          default: env-dev
 
+    # NEW — EXISTING SERVICE DEPLOYMENT
+    - title: Existing Service Deployment
+      properties:
+        workflowFile:
+          title: GitHub Workflow File
+          type: string
+          description: Workflow inside .github/workflows
+          default: ecs-deploy.yml
+
+        workflowRef:
+          title: Git Reference
+          type: string
+          default: main
+
+  ############################
+  # STEPS
+  ############################
   steps:
-    - id: fetch-base
+
+    # CHANGED — Parse RepoUrlPicker output
+    - id: parse-repo
+      name: Parse Repository
+      action: catalog:parseRepoUrl
+      input:
+        repoUrl: ${{ parameters.repoUrl }}
+
+    # =========================
+    # CREATE NEW SERVICE FLOW
+    # =========================
+    # NEW — Conditional execution
+    - id: fetch-template
+      if: ${{ parameters.serviceMode === 'create' }}
       name: Fetch Template Files
       action: fetch:template
       input:
@@ -207,70 +181,61 @@ spec:
           name: ${{ parameters.name }}
           description: ${{ parameters.description }}
           owner: ${{ parameters.owner }}
+          repoUrl: https://${{ steps.parse-repo.output.repo.host }}/${{ steps.parse-repo.output.repo.owner }}/${{ steps.parse-repo.output.repo.repo }}
           awsRegion: ${{ parameters.awsRegion }}
           ecrRepository: ${{ parameters.ecrRepository }}
           ecsCluster: ${{ parameters.ecsCluster }}
           ecsServiceName: ${{ parameters.ecsServiceName }}
           taskDefinitionFamily: ${{ parameters.taskDefinitionFamily }}
           containerPort: ${{ parameters.containerPort }}
-          healthCheckPath: ${{ parameters.healthCheckPath }}
-          serviceLogGroup: ${{ parameters.serviceLogGroup }}
           cpu: ${{ parameters.cpu }}
           memory: ${{ parameters.memory }}
-          vpcId: ${{ parameters.vpcId }}
-          subnetIds: ${{ parameters.subnetIds | join(',') }}
-          securityGroupIds: ${{ parameters.securityGroupIds | join(',') }}
           environment: ${{ parameters.environment }}
-          githubEnvBranch: ${{ parameters.githubEnvBranch }}
 
+    # CHANGED — Only create repo when creating service
     - id: publish
+      if: ${{ parameters.serviceMode === 'create' }}
       name: Publish to GitHub
       action: publish:github
       input:
-        description: ${{ parameters.description }}
         repoUrl: ${{ parameters.repoUrl }}
+        description: ${{ parameters.description }}
         defaultBranch: main
-        gitAuthorName: Backstage Scaffolder
-        gitAuthorEmail: scaffolder@aviso.com
 
+    # CHANGED — Register only for new services
     - id: register
+      if: ${{ parameters.serviceMode === 'create' }}
       name: Register in Catalog
       action: catalog:register
       input:
         repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
-        catalogInfoPath: '/catalog-info.yaml'
+        catalogInfoPath: /catalog-info.yaml
 
-    - id: notify
-      name: Notify
-      action: notification:send
+    # =========================
+    # DEPLOY EXISTING SERVICE
+    # =========================
+    # NEW — Trigger GitHub Actions workflow
+    - id: deploy-existing
+      if: ${{ parameters.serviceMode === 'deploy' }}
+      name: Trigger ECS Deployment
+      action: github:actions:dispatch
       input:
-        recipients: entity
-        entityRefs:
-          - ${{ parameters.owner }}
-        title: 'ECS Service Created Successfully'
-        info: 'Your ECS service "${{ parameters.name }}" has been created and registered in Backstage. Next steps: 1) Configure AWS credentials in GitHub Secrets, 2) Push to the ${{ parameters.githubEnvBranch }} branch to trigger deployment.'
-        severity: 'normal'
+        repoUrl: ${{ parameters.repoUrl }}
+        workflowId: ${{ parameters.workflowFile }}
+        ref: ${{ parameters.workflowRef }}
+        inputs:
+          environment: ${{ parameters.environment }}
 
+  ############################
+  # OUTPUT
+  ############################
   output:
     links:
-      - title: Repository
-        url: ${{ steps.publish.output.remoteUrl }}
-      - title: Open in catalog
+      # CHANGED — Human-readable GitHub URL
+      - title: GitHub Repository
+        url: https://${{ steps.parse-repo.output.repo.host }}/${{ steps.parse-repo.output.repo.owner }}/${{ steps.parse-repo.output.repo.repo }}
+
+      # NEW — Catalog link only exists for create flow
+      - title: Open in Backstage Catalog
         icon: catalog
         entityRef: ${{ steps.register.output.entityRef }}
-    text:
-      - title: Next Steps
-        content: |
-          1. Configure GitHub Secrets:
-             - AWS_ACCESS_KEY_ID
-             - AWS_SECRET_ACCESS_KEY
-             - AWS_REGION (or use the one you selected: ${{ parameters.awsRegion }})
-          
-          2. Push code to the '${{ parameters.githubEnvBranch }}' branch to trigger deployment
-          
-          3. The service will be automatically:
-             - Built as a Docker image
-             - Pushed to ECR: ${{ parameters.ecrRepository }}
-             - Deployed to ECS cluster: ${{ parameters.ecsCluster }}
-             - Registered in Backstage catalog
-
