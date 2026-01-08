@@ -1,0 +1,11 @@
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: 1shkr22
+  namespace: default
+spec:
+  profile:
+    displayName: Vansh Kumar
+    email: vansh.kumar@aviso.com
+  memberOf:
+    - platform
