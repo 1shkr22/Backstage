@@ -4,6 +4,7 @@ import { scaffolderActionsExtensionPoint } from '@backstage/plugin-scaffolder-no
 import { awsEcrCreateAction } from './awsEcrCreate';
 import { awsEcsRegisterTaskDefAction } from './awsEcsRegisterTaskDef';
 import { awsEcsCreateServiceAction } from './awsEcsCreateService';
+import { awsEventBridgeCreateCron } from './awsEventBridgeCreateCron';
 
 export const awsScaffolderActionsModule = createBackendModule({
   pluginId: 'scaffolder',
@@ -19,6 +20,7 @@ export const awsScaffolderActionsModule = createBackendModule({
           awsEcrCreateAction,
           awsEcsRegisterTaskDefAction,
           awsEcsCreateServiceAction,
+          awsEventBridgeCreateCron,
         );
       },
     });

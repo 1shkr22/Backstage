@@ -1,0 +1,158 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: ecs-cronjob-setup
+  title: ECS CronJob Setup
+  description: Create a scheduled ECS Fargate task
+spec:
+  owner: team:platform
+  type: service
+
+  parameters:
+    - title: Cron Configuration
+
+      # EXISTING FIELD (unchanged)
+      properties:
+        scheduleType:
+          type: string
+          enum: [rate, cron]
+          default: cron
+
+      # ADDED: Conditional UI behaviour for rate vs cron
+      dependencies:
+        scheduleType:
+          oneOf:
+            # -----------------------------
+            # RATE EXPRESSION
+            # -----------------------------
+            - properties:
+                scheduleType:
+                  const: rate
+
+                intervalValue:
+                  title: Every X minutes
+                  type: number
+                  default: 60
+                  minimum: 1
+
+                timezone:
+                  title: Timezone
+                  type: string
+                  enum: [UTC, IST]
+                  default: UTC
+
+              required:
+                - intervalValue
+                - timezone
+
+            # -----------------------------
+            # CRON EXPRESSION
+            # -----------------------------
+            - properties:
+                scheduleType:
+                  const: cron
+
+                minute: { type: string, default: "0" }
+                hour: { type: string, default: "*" }
+                dayOfMonth: { type: string, default: "*" }
+                month: { type: string, default: "*" }
+                dayOfWeek: { type: string, default: "?" }
+                year: { type: string, default: "*" }
+
+                # ADDED: timezone toggle for cron
+                timezone:
+                  title: Timezone
+                  type: string
+                  enum: [UTC, IST]
+                  default: UTC
+
+              required:
+                - minute
+                - hour
+                - dayOfMonth
+                - month
+                - dayOfWeek
+                - year
+                - timezone
+
+    - title: AWS Configuration
+      required:
+        - ecsCluster
+        - taskFamily
+        - containerImage
+        - logGroup
+        - environment
+        - cpu
+        - memory
+      properties:
+        ecsCluster: { type: string }
+        taskFamily: { type: string }
+        containerImage: { type: string }
+        logGroup: { type: string }
+
+        cpu:
+          type: string
+          default: "1024"
+          enum: ["512", "1024", "2048"]
+        memory:
+          type: string
+          default: "2048"
+          enum: ["1024", "2048", "4096"]
+
+        environment:
+          type: string
+          enum: [dev, prod]
+          default: dev
+
+  steps:
+    # --------------------------------------------------
+    # Register Task Definition 
+    # --------------------------------------------------
+    - id: register-cron-task-def
+      name: Register Cron Task Definition
+      action: aws:ecs:register-task-def
+      input:
+        family: ${{ parameters.taskFamily }}
+        containerName: cron
+        image: ${{ parameters.containerImage }}
+        cpu: ${{ parameters.cpu }}
+        memory: ${{ parameters.memory }}
+        region: us-east-1
+        executionRoleArn: arn:aws:iam::369521641981:role/ecsTaskExecutionRole
+
+    # --------------------------------------------------
+    # Create EventBridge Rule
+    # --------------------------------------------------
+    - id: create-ecs-cron
+      name: Create EventBridge Cron
+      action: aws:eventbridge:create-cron
+      input:
+        ruleName: ${{ parameters.taskFamily }}-rule
+
+        scheduleExpression: >-
+          {%- if parameters.scheduleType == 'rate' -%}
+          rate(${{ parameters.intervalValue }} minutes)
+          {%- else -%}
+          cron(${{ parameters.minute }} ${{ parameters.hour }} ${{ parameters.dayOfMonth }} ${{ parameters.month }} ${{ parameters.dayOfWeek }} ${{ parameters.year }})
+          {%- endif -%}
+
+        timezone: ${{ parameters.timezone }}
+
+        region: us-east-1
+
+        clusterArn: >-
+          arn:aws:ecs:us-east-1:369521641981:cluster/${{ parameters.ecsCluster }}
+
+        taskDefinitionArn: >-
+          arn:aws:ecs:us-east-1:369521641981:task-definition/${{ parameters.taskFamily }}
+
+        roleArn: arn:aws:iam::369521641981:role/ecsEventsRole
+
+        subnets:
+          - subnet-0e9d3f1ad15c0ee74
+          - subnet-07cc2e35a5592549c
+          - subnet-093d89d1190420ba3
+          - subnet-04119f906b86b11ed
+
+        securityGroups:
+          - sg-0313a6e7a7b90578c

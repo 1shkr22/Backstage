@@ -1,13 +1,13 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: aviso-ecs-service-template
-  title: Aviso ECS Service Template
-  description: Create or deploy ECS services via Backstage
+  name: aviso-ecs-service
+  title: ECS Service Deployment
+  description: Create a new ECS service or trigger an existing deployment workflow
   tags:
     - aws
     - ecs
-    - docker
+    - deployment
     - github-actions
 
 spec:
@@ -18,9 +18,7 @@ spec:
   # PARAMETERS
   ############################
   parameters:
-
-    # NEW — SERVICE MODE
-    - title: Service Mode
+    - title: Deployment Options
       required:
         - serviceMode
       properties:
@@ -30,45 +28,13 @@ spec:
           default: create
           enum:
             - create
-            - deploy
+            - trigger
           enumNames:
             - Create a new ECS service
-            - Deploy an existing ECS service
+            - Trigger existing deployment workflow
 
-    # -------------------------
-    # SERVICE INFORMATION
-    # -------------------------
-    - title: Service Information
-      required:
-        - name
-        - description
-        - owner
-      properties:
-        name:
-          title: Service Name
-          type: string
-          pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
-        description:
-          title: Description
-          type: string
-        owner:
-          title: Owner
-          type: string
-          ui:field: OwnerPicker
-          ui:options:
-            allowedKinds:
-              - user
-              - group
-
-    # -------------------------
-    # REPOSITORY CONFIG
-    # -------------------------
-    - title: Repository Configuration
-      required:
-        - repoUrl
-      properties:
         repoUrl:
-          title: Repository Location
+          title: GitHub Repository
           type: string
           ui:field: RepoUrlPicker
           ui:options:
@@ -78,60 +44,6 @@ spec:
               - repo
               - workflow
 
-    # -------------------------
-    # ECS CONFIG (NEW SERVICE)
-    # -------------------------
-    - title: AWS ECS Configuration
-      properties:
-        awsRegion:
-          title: AWS Region
-          type: string
-          default: us-east-1
-          enum:
-            - us-east-1
-            - us-east-2
-            - us-west-1
-            - us-west-2
-            - eu-west-1
-            - eu-central-1
-            - ap-south-1
-
-        ecrRepository:
-          title: ECR Repository Name
-          type: string
-
-        ecsCluster:
-          title: ECS Cluster Name
-          type: string
-
-        ecsServiceName:
-          title: ECS Service Name
-          type: string
-
-        taskDefinitionFamily:
-          title: Task Definition Family
-          type: string
-
-        containerPort:
-          title: Container Port
-          type: integer
-          default: 3000
-
-        cpu:
-          title: CPU Units
-          type: integer
-          default: 256
-
-        memory:
-          title: Memory (MB)
-          type: integer
-          default: 512
-
-    # -------------------------
-    # ENVIRONMENT CONFIG
-    # -------------------------
-    - title: Environment Configuration
-      properties:
         environment:
           title: Environment
           type: string
@@ -141,89 +53,174 @@ spec:
             - staging
             - prod
 
-    # NEW — EXISTING SERVICE DEPLOYMENT
-    - title: Existing Service Deployment
-      properties:
-        workflowFile:
-          title: GitHub Workflow File
-          type: string
-          description: Workflow inside .github/workflows
-          default: ecs-deploy.yml
+      dependencies:
+        serviceMode:
+          oneOf:
+            # =====================================================
+            # CREATE NEW ECS SERVICE
+            # =====================================================
+            - properties:
+                serviceMode:
+                  const: create
 
-        workflowRef:
-          title: Git Reference
-          type: string
-          default: main
+                ecsCluster:
+                  title: ECS Cluster
+                  type: string
+                  description: ECS cluster where service will be created
+
+                ecsServiceName:
+                  title: ECS Service Name
+                  type: string
+
+                taskFamilyName:
+                  title: Task Definition Family Name
+                  type: string
+                  description: The family name (usually ends with -td)
+                  default: "plg-selfservice-demo-td"  
+
+                ecrRepository:
+                  title: ECR Repository Name
+                  type: string
+
+                containerName:
+                  title: Container Name
+                  type: string
+                  default: app
+
+                containerImage:
+                  title: Container Image
+                  type: string
+                  description: Initial image (can be placeholder, e.g. nginx:latest)
+
+                cpu:
+                  title: vCPU Units
+                  type: string
+                  default: "512"
+                  enum:
+                    - "256"
+                    - "512"
+                    - "1024"
+                    - "2048"
+                    - "4096"
+
+                memory:
+                  title: Memory (MB)
+                  type: string
+                  default: "1024"
+                  enum:
+                    - "512"
+                    - "1024"
+                    - "2048"
+                    - "4096"
+                    - "8192"
+
+                awsRegion:
+                  title: AWS Region
+                  type: string
+                  default: us-east-1
+
+              required:
+                - repoUrl
+                - environment
+                - ecsCluster
+                - ecsServiceName
+                - ecrRepository
+                - containerName
+                - containerImage
+                - cpu
+                - memory
+                - awsRegion
+
+            # =====================================================
+            # TRIGGER EXISTING WORKFLOW
+            # =====================================================
+            - properties:
+                serviceMode:
+                  const: trigger
+
+              required:
+                - repoUrl
+                - environment
 
   ############################
   # STEPS
   ############################
   steps:
-
-    # CHANGED — Parse RepoUrlPicker output
-    - id: parse-repo
-      name: Parse Repository
-      action: catalog:parseRepoUrl
-      input:
-        repoUrl: ${{ parameters.repoUrl }}
-
-    # =========================
-    # CREATE NEW SERVICE FLOW
-    # =========================
-    # NEW — Conditional execution
-    - id: fetch-template
+    # ---------------------------------------------------------
+    # CREATE FLOW (AWS)
+    # ---------------------------------------------------------
+    - id: create-ecr
       if: ${{ parameters.serviceMode === 'create' }}
-      name: Fetch Template Files
-      action: fetch:template
+      name: Create ECR Repository
+      action: aws:ecr:create
       input:
-        url: ./content
-        values:
-          name: ${{ parameters.name }}
-          description: ${{ parameters.description }}
-          owner: ${{ parameters.owner }}
-          repoUrl: https://${{ steps.parse-repo.output.repo.host }}/${{ steps.parse-repo.output.repo.owner }}/${{ steps.parse-repo.output.repo.repo }}
-          awsRegion: ${{ parameters.awsRegion }}
-          ecrRepository: ${{ parameters.ecrRepository }}
-          ecsCluster: ${{ parameters.ecsCluster }}
-          ecsServiceName: ${{ parameters.ecsServiceName }}
-          taskDefinitionFamily: ${{ parameters.taskDefinitionFamily }}
-          containerPort: ${{ parameters.containerPort }}
-          cpu: ${{ parameters.cpu }}
-          memory: ${{ parameters.memory }}
-          environment: ${{ parameters.environment }}
+        repositoryName: ${{ parameters.ecrRepository }}
+        region: ${{ parameters.awsRegion }}
 
-    # CHANGED — Only create repo when creating service
-    - id: publish
+    - id: register-task-def
       if: ${{ parameters.serviceMode === 'create' }}
-      name: Publish to GitHub
-      action: publish:github
+      name: Register ECS Task Definition
+      action: aws:ecs:register-task-def
       input:
-        repoUrl: ${{ parameters.repoUrl }}
-        description: ${{ parameters.description }}
-        defaultBranch: main
+        family: ${{ parameters.ecsServiceName }}
+        containerName: ${{ parameters.containerName }}
+        image: ${{ parameters.containerImage }}
+        cpu: ${{ parameters.cpu }}
+        memory: ${{ parameters.memory }}
+        region: ${{ parameters.awsRegion }}
+        executionRoleArn: "arn:aws:iam::369521641981:role/ecsTaskExecutionRole"
 
-    # CHANGED — Register only for new services
-    - id: register
+    - id: create-ecs-service
       if: ${{ parameters.serviceMode === 'create' }}
-      name: Register in Catalog
+      name: Create ECS Service
+      action: aws:ecs:create-service
+      input:
+        cluster: ${{ parameters.ecsCluster }}
+        serviceName: ${{ parameters.ecsServiceName }}
+        region: ${{ parameters.awsRegion }}
+
+        # Wrap the logic in a JSON filter to ensure it remains an array
+        subnets: ${{ [
+            'subnet-0e9d3f1ad15c0ee74',
+            'subnet-07cc2e35a5592549c',
+            'subnet-093d89d1190420ba3',
+            'subnet-04119f906b86b11ed'
+          ] if parameters.environment == 'dev' else [
+            'subnet-3c0f0514',
+            'subnet-8b795ffc',
+            'subnet-ed8e64b4'
+          ] }}
+
+        securityGroups:
+          ${{ ['sg-0313a6e7a7b90578c'] if parameters.environment == 'dev' else ['sg-0c0a6611b141ad86d'] }}
+
+        taskDefinition: >-
+          {%- if parameters.environment == 'dev' -%}
+            arn:aws:ecs:${{ parameters.awsRegion }}:369521641981:task-definition/${{ parameters.ecsServiceName }}
+          {%- else -%}
+            arn:aws:ecs:${{ parameters.awsRegion }}:270591008196:task-definition/${{ parameters.ecsServiceName }}
+          {%- endif -%}
+
+    - id: register-service
+      if: ${{ parameters.serviceMode === 'create' }}
+      name: Register Service in Backstage Catalog
       action: catalog:register
       input:
-        repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
+        repoContentsUrl: ${{ parameters.repoUrl }}
         catalogInfoPath: /catalog-info.yaml
 
-    # =========================
-    # DEPLOY EXISTING SERVICE
-    # =========================
-    # NEW — Trigger GitHub Actions workflow
-    - id: deploy-existing
-      if: ${{ parameters.serviceMode === 'deploy' }}
-      name: Trigger ECS Deployment
+    # ---------------------------------------------------------
+    # TRIGGER FLOW (GITHUB ACTIONS)
+    # ---------------------------------------------------------
+    - id: trigger-deployment
+      if: ${{ parameters.serviceMode === 'trigger' }}
+      name: Trigger Deployment Workflow
       action: github:actions:dispatch
       input:
         repoUrl: ${{ parameters.repoUrl }}
-        workflowId: ${{ parameters.workflowFile }}
-        ref: ${{ parameters.workflowRef }}
-        inputs:
+        workflowId: ecs-deploy-dev.yml
+        branchOrTagName: dev
+        workflowInputs:
           environment: ${{ parameters.environment }}
 
   ############################
@@ -231,11 +228,8 @@ spec:
   ############################
   output:
     links:
-      # CHANGED — Human-readable GitHub URL
       - title: GitHub Repository
-        url: https://${{ steps.parse-repo.output.repo.host }}/${{ steps.parse-repo.output.repo.owner }}/${{ steps.parse-repo.output.repo.repo }}
-
-      # NEW — Catalog link only exists for create flow
+        url: ${{ parameters.repoUrl }}
       - title: Open in Backstage Catalog
         icon: catalog
-        entityRef: ${{ steps.register.output.entityRef }}
+        entityRef: ${{ steps.register-service.output.entityRef }}
