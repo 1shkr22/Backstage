@@ -16,12 +16,12 @@ export const awsEventBridgeCreateCron = createTemplateAction({
         scheduleExpression: z.string(),
         region: z.string(),
 
-        clusterArn: z.string(),
-        taskDefinitionArn: z.string(),
-        roleArn: z.string(),
+        clusterArn: z.string().optional(),
+        taskDefinitionArn: z.string().optional(),
+        roleArn: z.string().optional(),
 
-        subnets: z.array(z.string()),
-        securityGroups: z.array(z.string()),
+        subnets: z.array(z.string()).optional(),
+        securityGroups: z.array(z.string()).optional(),
 
         timezone: z.enum(['UTC', 'IST']).default('UTC'),
       }),
@@ -72,7 +72,14 @@ export const awsEventBridgeCreateCron = createTemplateAction({
       `EventBridge rule created/updated: ${ctx.input.ruleName}`,
     );
 
-    await client.send(
+    if (
+        ctx.input.clusterArn &&
+        ctx.input.taskDefinitionArn &&
+        ctx.input.roleArn &&
+        ctx.input.subnets &&
+        ctx.input.securityGroups
+    ) {
+      await client.send(
       new PutTargetsCommand({
         Rule: ctx.input.ruleName,
         Targets: [
@@ -95,7 +102,7 @@ export const awsEventBridgeCreateCron = createTemplateAction({
           },
         ],
       }),
-    );
+    );}
 
     ctx.logger.info(
       `ECS task target attached to rule: ${ctx.input.ruleName}`,

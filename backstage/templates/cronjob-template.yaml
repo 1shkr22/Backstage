@@ -3,27 +3,28 @@ kind: Template
 metadata:
   name: ecs-cronjob-setup
   title: ECS CronJob Setup
-  description: Create a scheduled ECS Fargate task
+  description: Create or update a scheduled ECS Fargate task
 spec:
   owner: team:platform
   type: service
 
   parameters:
+    # =====================================================
+    # CRON / RATE / UPDATE CONFIGURATION
+    # =====================================================
     - title: Cron Configuration
-
-      # EXISTING FIELD (unchanged)
       properties:
         scheduleType:
+          title: Action
           type: string
-          enum: [rate, cron]
+          enum: [rate, cron, update]
           default: cron
 
-      # ADDED: Conditional UI behaviour for rate vs cron
       dependencies:
         scheduleType:
           oneOf:
             # -----------------------------
-            # RATE EXPRESSION
+            # RATE (CREATE)
             # -----------------------------
             - properties:
                 scheduleType:
@@ -41,12 +42,10 @@ spec:
                   enum: [UTC, IST]
                   default: UTC
 
-              required:
-                - intervalValue
-                - timezone
+              required: [intervalValue, timezone]
 
             # -----------------------------
-            # CRON EXPRESSION
+            # CRON (CREATE)
             # -----------------------------
             - properties:
                 scheduleType:
@@ -59,7 +58,6 @@ spec:
                 dayOfWeek: { type: string, default: "?" }
                 year: { type: string, default: "*" }
 
-                # ADDED: timezone toggle for cron
                 timezone:
                   title: Timezone
                   type: string
@@ -75,16 +73,59 @@ spec:
                 - year
                 - timezone
 
+            # -----------------------------
+            # UPDATE EXISTING RULE
+            # -----------------------------
+            - properties:
+                scheduleType:
+                  const: update
+
+                ruleName:
+                  title: EventBridge Rule Name
+                  type: string
+                  description: Existing EventBridge rule to update
+
+                minute: { type: string, default: "0" }
+                hour: { type: string, default: "*" }
+                dayOfMonth: { type: string, default: "*" }
+                month: { type: string, default: "*" }
+                dayOfWeek: { type: string, default: "?" }
+                year: { type: string, default: "*" }
+
+                timezone:
+                  title: Timezone
+                  type: string
+                  enum: [UTC, IST]
+                  default: UTC
+
+              required:
+                - ruleName
+                - minute
+                - hour
+                - dayOfMonth
+                - month
+                - dayOfWeek
+                - year
+                - timezone
+
+    # =====================================================
+    # AWS CONFIGURATION
+    # =====================================================
     - title: AWS Configuration
-      required:
-        - ecsCluster
-        - taskFamily
-        - containerImage
-        - logGroup
-        - environment
-        - cpu
-        - memory
+      required: [region, environment]
       properties:
+        region:
+          title: AWS Region
+          type: string
+          enum: [us-east-1, us-east-2, us-west-1, us-west-2]
+          default: us-east-1
+
+        environment:
+          type: string
+          enum: [dev, prod]
+          default: dev
+
+        # USED ONLY FOR CREATE
         ecsCluster: { type: string }
         taskFamily: { type: string }
         containerImage: { type: string }
@@ -99,16 +140,12 @@ spec:
           default: "2048"
           enum: ["1024", "2048", "4096"]
 
-        environment:
-          type: string
-          enum: [dev, prod]
-          default: dev
-
   steps:
-    # --------------------------------------------------
-    # Register Task Definition 
-    # --------------------------------------------------
+    # =====================================================
+    # REGISTER TASK DEFINITION (CREATE ONLY)
+    # =====================================================
     - id: register-cron-task-def
+      if: ${{ parameters.scheduleType != 'update' }}
       name: Register Cron Task Definition
       action: aws:ecs:register-task-def
       input:
@@ -117,13 +154,14 @@ spec:
         image: ${{ parameters.containerImage }}
         cpu: ${{ parameters.cpu }}
         memory: ${{ parameters.memory }}
-        region: us-east-1
+        region: ${{ parameters.region }}
         executionRoleArn: arn:aws:iam::369521641981:role/ecsTaskExecutionRole
 
-    # --------------------------------------------------
-    # Create EventBridge Rule
-    # --------------------------------------------------
+    # =====================================================
+    # CREATE EVENTBRIDGE RULE (WITH ECS TARGET)
+    # =====================================================
     - id: create-ecs-cron
+      if: ${{ parameters.scheduleType != 'update' }}
       name: Create EventBridge Cron
       action: aws:eventbridge:create-cron
       input:
@@ -137,15 +175,10 @@ spec:
           {%- endif -%}
 
         timezone: ${{ parameters.timezone }}
+        region: ${{ parameters.region }}
 
-        region: us-east-1
-
-        clusterArn: >-
-          arn:aws:ecs:us-east-1:369521641981:cluster/${{ parameters.ecsCluster }}
-
-        taskDefinitionArn: >-
-          arn:aws:ecs:us-east-1:369521641981:task-definition/${{ parameters.taskFamily }}
-
+        clusterArn: arn:aws:ecs:${{ parameters.region }}:369521641981:cluster/${{ parameters.ecsCluster }}
+        taskDefinitionArn: arn:aws:ecs:${{ parameters.region }}:369521641981:task-definition/${{ parameters.taskFamily }}
         roleArn: arn:aws:iam::369521641981:role/ecsEventsRole
 
         subnets:
@@ -156,3 +189,19 @@ spec:
 
         securityGroups:
           - sg-0313a6e7a7b90578c
+
+    # =====================================================
+    # UPDATE EVENTBRIDGE RULE (SCHEDULE ONLY)
+    # =====================================================
+    - id: update-ecs-cron
+      if: ${{ parameters.scheduleType == 'update' }}
+      name: Update EventBridge Cron Schedule
+      action: aws:eventbridge:create-cron
+      input:
+        ruleName: ${{ parameters.ruleName }}
+
+        scheduleExpression: >-
+          cron(${{ parameters.minute }} ${{ parameters.hour }} ${{ parameters.dayOfMonth }} ${{ parameters.month }} ${{ parameters.dayOfWeek }} ${{ parameters.year }})
+
+        timezone: ${{ parameters.timezone }}
+        region: ${{ parameters.region }}
