@@ -19,6 +19,7 @@ export const awsEcsRegisterTaskDefAction = createTemplateAction({
         region: z.string(),
         executionRoleArn: z.string(),
         taskRoleArn: z.string().optional(),
+        containerPort: z.number(),
       }),
   },
 
@@ -43,7 +44,7 @@ export const awsEcsRegisterTaskDefAction = createTemplateAction({
             name: ctx.input.containerName,
             image: ctx.input.image,
             essential: true,
-            portMappings: [{ containerPort: 3000 }],
+            portMappings: [{ containerPort: ctx.input.containerPort, }],
           },
         ],
       }),

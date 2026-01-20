@@ -6,6 +6,10 @@ import { awsEcsRegisterTaskDefAction } from './awsEcsRegisterTaskDef';
 import { awsEcsCreateServiceAction } from './awsEcsCreateService';
 import { awsEventBridgeCreateCron } from './awsEventBridgeCreateCron';
 
+import { awsElbv2CreateTargetGroupAction } from './awsElbv2CreateTargetGroup';
+import { awsElbv2CreateAlbAction } from './awsElbv2CreateAlb';
+import { awsElbv2CreateListenerAction } from './awsElbv2CreateListener';
+
 export const awsScaffolderActionsModule = createBackendModule({
   pluginId: 'scaffolder',
   moduleId: 'aws-actions',
@@ -21,6 +25,10 @@ export const awsScaffolderActionsModule = createBackendModule({
           awsEcsRegisterTaskDefAction,
           awsEcsCreateServiceAction,
           awsEventBridgeCreateCron,
+
+          awsElbv2CreateTargetGroupAction,
+          awsElbv2CreateAlbAction,
+          awsElbv2CreateListenerAction,
         );
       },
     });

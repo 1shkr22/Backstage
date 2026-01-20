@@ -26,9 +26,7 @@ spec:
           title: What do you want to do?
           type: string
           default: create
-          enum:
-            - create
-            - trigger
+          enum: [create, trigger]
           enumNames:
             - Create a new ECS service
             - Trigger existing deployment workflow
@@ -38,20 +36,14 @@ spec:
           type: string
           ui:field: RepoUrlPicker
           ui:options:
-            allowedHosts:
-              - github.com
-            requestUserPermission:
-              - repo
-              - workflow
+            allowedHosts: [github.com]
+            requestUserPermission: [repo, workflow]
 
         environment:
           title: Environment
           type: string
           default: dev
-          enum:
-            - dev
-            - staging
-            - prod
+          enum: [dev, staging, prod]
 
       dependencies:
         serviceMode:
@@ -66,17 +58,10 @@ spec:
                 ecsCluster:
                   title: ECS Cluster
                   type: string
-                  description: ECS cluster where service will be created
 
                 ecsServiceName:
                   title: ECS Service Name
                   type: string
-
-                taskFamilyName:
-                  title: Task Definition Family Name
-                  type: string
-                  description: The family name (usually ends with -td)
-                  default: "plg-selfservice-demo-td"  
 
                 ecrRepository:
                   title: ECR Repository Name
@@ -87,37 +72,38 @@ spec:
                   type: string
                   default: app
 
+                containerPort:
+                  title: Container Port
+                  type: number
+                  default: 8000
+                  description: Port on which the container listens  
+
                 containerImage:
                   title: Container Image
                   type: string
-                  description: Initial image (can be placeholder, e.g. nginx:latest)
 
                 cpu:
                   title: vCPU Units
                   type: string
                   default: "512"
-                  enum:
-                    - "256"
-                    - "512"
-                    - "1024"
-                    - "2048"
-                    - "4096"
+                  enum: ["256", "512", "1024", "2048", "4096"]
 
                 memory:
                   title: Memory (MB)
                   type: string
                   default: "1024"
-                  enum:
-                    - "512"
-                    - "1024"
-                    - "2048"
-                    - "4096"
-                    - "8192"
+                  enum: ["512", "1024", "2048", "4096", "8192"]
 
                 awsRegion:
                   title: AWS Region
                   type: string
                   default: us-east-1
+
+                # 🔹 NEW: ALB toggle
+                enableLoadBalancer:
+                  title: Expose service via Load Balancer
+                  type: boolean
+                  default: false
 
               required:
                 - repoUrl
@@ -126,10 +112,59 @@ spec:
                 - ecsServiceName
                 - ecrRepository
                 - containerName
+                - containerPort
                 - containerImage
                 - cpu
                 - memory
                 - awsRegion
+
+              dependencies:
+                enableLoadBalancer:
+                  oneOf:
+                    - properties:
+                        enableLoadBalancer:
+                          const: true
+
+                        vpcId:
+                          title: VPC ID
+                          type: string
+
+                        targetGroupName:
+                          title: Target Group Name
+                          type: string
+
+                        targetGroupPort:
+                          title: Target Group Port
+                          type: number
+                          default: 8000
+
+                        healthCheckPath:
+                          title: Health Check Path
+                          type: string
+                          default: /health
+
+                        loadBalancerName:
+                          title: Load Balancer Name
+                          type: string
+
+                        albSecurityGroups:
+                          title: ALB Security Groups
+                          type: array
+                          items:
+                            type: string
+
+                        certificateArn:
+                          title: ACM Certificate ARN
+                          type: string
+
+                      required:
+                        - vpcId
+                        - targetGroupName
+                        - targetGroupPort
+                        - healthCheckPath
+                        - loadBalancerName
+                        - albSecurityGroups
+                        - certificateArn
 
             # =====================================================
             # TRIGGER EXISTING WORKFLOW
@@ -137,7 +172,6 @@ spec:
             - properties:
                 serviceMode:
                   const: trigger
-
               required:
                 - repoUrl
                 - environment
@@ -164,14 +198,77 @@ spec:
       input:
         family: ${{ parameters.ecsServiceName }}
         containerName: ${{ parameters.containerName }}
+        containerPort: ${{ parameters.containerPort }}
         image: ${{ parameters.containerImage }}
         cpu: ${{ parameters.cpu }}
         memory: ${{ parameters.memory }}
         region: ${{ parameters.awsRegion }}
-        executionRoleArn: "arn:aws:iam::369521641981:role/ecsTaskExecutionRole"
+        executionRoleArn: arn:aws:iam::369521641981:role/ecsTaskExecutionRole
 
+    # Create Target Group
+    - id: create-target-group
+      if: ${{ parameters.enableLoadBalancer }}
+      name: Create Target Group
+      action: aws:elbv2:create-target-group
+      input:
+        name: ${{ parameters.targetGroupName }}
+        protocol: HTTP
+        port: ${{ parameters.targetGroupPort }}
+        vpcId: ${{ parameters.vpcId }}
+        healthCheckPath: ${{ parameters.healthCheckPath }}
+        region: ${{ parameters.awsRegion }}
+
+    # Create ALB
+    - id: create-alb
+      if: ${{ parameters.enableLoadBalancer }}
+      name: Create ALB
+      action: aws:elbv2:create-alb
+      input:
+        name: ${{ parameters.loadBalancerName }}
+        subnets:
+          - subnet-0e1a5c54a6d9fe52b
+          - subnet-07cc2e35a5592549c
+        securityGroups: ${{ parameters.albSecurityGroups }}
+        region: ${{ parameters.awsRegion }}
+
+    # HTTP Listener
+    - id: create-http-listener
+      if: ${{ parameters.enableLoadBalancer }}
+      dependsOn:                
+      - create-target-group
+      - create-alb
+      name: Create HTTP Listener
+      action: aws:elbv2:create-listener
+      input:
+        loadBalancerArn: ${{ steps['create-alb'].output.loadBalancerArn }}
+        port: 80
+        protocol: HTTP
+        targetGroupArn: ${{ steps['create-target-group'].output.targetGroupArn }}
+        region: ${{ parameters.awsRegion }}
+
+    # HTTPS Listener
+    - id: create-https-listener
+      if: ${{ parameters.enableLoadBalancer }}
+      dependsOn:                
+      - create-target-group
+      - create-alb
+      name: Create HTTPS Listener
+      action: aws:elbv2:create-listener
+      input:
+        loadBalancerArn: ${{ steps['create-alb'].output.loadBalancerArn }}
+        port: 443
+        protocol: HTTPS
+        certificateArn: ${{ parameters.certificateArn }}
+        targetGroupArn: ${{ steps['create-target-group'].output.targetGroupArn }}
+        region: ${{ parameters.awsRegion }}
+
+    # ---------------------------------------------------------
+    # CREATE ECS SERVICE
+    # ---------------------------------------------------------
     - id: create-ecs-service
       if: ${{ parameters.serviceMode === 'create' }}
+      dependsOn:                
+      - create-target-group
       name: Create ECS Service
       action: aws:ecs:create-service
       input:
@@ -179,38 +276,31 @@ spec:
         serviceName: ${{ parameters.ecsServiceName }}
         region: ${{ parameters.awsRegion }}
 
-        # Wrap the logic in a JSON filter to ensure it remains an array
-        subnets: ${{ [
-            'subnet-0e9d3f1ad15c0ee74',
-            'subnet-07cc2e35a5592549c',
-            'subnet-093d89d1190420ba3',
-            'subnet-04119f906b86b11ed'
-          ] if parameters.environment == 'dev' else [
-            'subnet-3c0f0514',
-            'subnet-8b795ffc',
-            'subnet-ed8e64b4'
-          ] }}
+        taskDefinition: arn:aws:ecs:${{ parameters.awsRegion }}:369521641981:task-definition/${{ parameters.ecsServiceName }}
+
+        subnets:
+          - subnet-0e9d3f1ad15c0ee74
+          - subnet-07cc2e35a5592549c
 
         securityGroups:
-          ${{ ['sg-0313a6e7a7b90578c'] if parameters.environment == 'dev' else ['sg-0c0a6611b141ad86d'] }}
+          - sg-0313a6e7a7b90578c
 
-        taskDefinition: >-
-          {%- if parameters.environment == 'dev' -%}
-            arn:aws:ecs:${{ parameters.awsRegion }}:369521641981:task-definition/${{ parameters.ecsServiceName }}
-          {%- else -%}
-            arn:aws:ecs:${{ parameters.awsRegion }}:270591008196:task-definition/${{ parameters.ecsServiceName }}
-          {%- endif -%}
+        loadBalancers:
+          - targetGroupArn: ${{ steps['create-target-group'].output.targetGroupArn }}
+            containerName: ${{ parameters.containerName }}
+            containerPort: ${{ parameters.targetGroupPort }}
 
     - id: register-service
       if: ${{ parameters.serviceMode === 'create' }}
       name: Register Service in Backstage Catalog
       action: catalog:register
       input:
-        repoContentsUrl: ${{ parameters.repoUrl }}
+        repoContentsUrl: https://github.com/${{ parameters.repoUrl | replace("github.com?owner=", "") | replace("&repo=", "/") }}
         catalogInfoPath: /catalog-info.yaml
+        optional: true
 
     # ---------------------------------------------------------
-    # TRIGGER FLOW (GITHUB ACTIONS)
+    # TRIGGER FLOW
     # ---------------------------------------------------------
     - id: trigger-deployment
       if: ${{ parameters.serviceMode === 'trigger' }}
@@ -232,4 +322,6 @@ spec:
         url: ${{ parameters.repoUrl }}
       - title: Open in Backstage Catalog
         icon: catalog
-        entityRef: ${{ steps.register-service.output.entityRef }}
+        entityRef: ${{ steps['register-service'].output.entityRef }}
+      - title: Service URL
+        url: https://${{ steps['create-alb'].output.dnsName }}

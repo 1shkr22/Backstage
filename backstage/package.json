@@ -56,6 +56,7 @@
   "dependencies": {
     "@aws-sdk/client-ecr": "^3.968.0",
     "@aws-sdk/client-ecs": "^3.968.0",
+    "@aws-sdk/client-elastic-load-balancing-v2": "^3.971.0",
     "@aws-sdk/client-eventbridge": "^3.971.0",
     "@backstage/plugin-auth-backend-module-github-provider": "^0.4.0",
     "@backstage/plugin-scaffolder-backend-module-github": "^0.9.3"

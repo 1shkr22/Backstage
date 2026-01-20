@@ -5,7 +5,7 @@ export const awsEcsCreateServiceAction = createTemplateAction({
   id: 'aws:ecs:create-service',
 
   schema: {
-    input: zImpl => 
+    input: zImpl =>
       zImpl.object({
         cluster: zImpl.string(),
         serviceName: zImpl.string(),
@@ -13,17 +13,34 @@ export const awsEcsCreateServiceAction = createTemplateAction({
         region: zImpl.string(),
         subnets: zImpl.array(zImpl.string()),
         securityGroups: zImpl.array(zImpl.string()),
+
+        loadBalancers: zImpl
+          .array(
+            zImpl.object({
+              targetGroupArn: zImpl.string(),
+              containerName: zImpl.string(),
+              containerPort: zImpl.number(),
+            }),
+          )
+          .optional(),
       }).passthrough(),
   },
 
   async handler(ctx) {
     const ecs = new ECSClient({ region: ctx.input.region });
-    const { cluster, serviceName, taskDefinition, subnets, securityGroups } = ctx.input;
+    const {
+      cluster,
+      serviceName,
+      taskDefinition,
+      subnets,
+      securityGroups,
+      loadBalancers,
+    } = ctx.input;
 
     if (!taskDefinition || typeof taskDefinition !== 'string') {
-        throw new Error(
-            `create-service failed: taskDefinition was not resolved. Value: ${JSON.stringify(taskDefinition)}`
-        );
+      throw new Error(
+        `create-service failed: taskDefinition was not resolved. Value: ${JSON.stringify(taskDefinition)}`,
+      );
     }
 
     await ecs.send(
@@ -40,6 +57,11 @@ export const awsEcsCreateServiceAction = createTemplateAction({
             assignPublicIp: 'DISABLED',
           },
         },
+
+        loadBalancers:
+          loadBalancers && loadBalancers.length > 0
+            ? loadBalancers
+            : undefined,
       }),
     );
 
