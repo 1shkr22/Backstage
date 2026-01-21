@@ -295,7 +295,12 @@ spec:
       name: Register Service in Backstage Catalog
       action: catalog:register
       input:
-        repoContentsUrl: https://github.com/${{ parameters.repoUrl | replace("github.com?owner=", "") | replace("&repo=", "/") }}
+        repoContentsUrl: >-
+          https://github.com/${{
+            parameters.repoUrl
+              | replace("github.com?owner=", "")
+              | replace("&repo=", "/")
+          }}/blob/${{ parameters.environment }}
         catalogInfoPath: /catalog-info.yaml
         optional: true
 
