@@ -83,9 +83,7 @@ auth:
         ## uncomment to set lifespan of user session
         # sessionDuration: { hours: 24 } # supports `ms` library format (e.g. '24h', '2 days'), ISO duration, "human duration" as used in code
         signIn:
-          resolvers:
-            # See https://backstage.io/docs/auth/github/provider#resolvers for more resolvers
-            - resolver: usernameMatchingUserEntityName
+          resolvers: []    
 
 scaffolder:
   # see https://backstage.io/docs/features/software-templates/configuration for software template options

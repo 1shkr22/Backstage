@@ -10,6 +10,7 @@ import { createBackend } from '@backstage/backend-defaults';
 import githubScaffolderModule from '@backstage/plugin-scaffolder-backend-module-github';
 
 import { awsScaffolderActionsModule } from './plugins/scaffolder/awsActionsModule';
+import { customAuth } from './auth/githubResolver'
 
 const backend = createBackend();
 
@@ -39,8 +40,9 @@ backend.add(import('@backstage/plugin-techdocs-backend'));
 // auth
 // --------------------
 backend.add(import('@backstage/plugin-auth-backend'));
-backend.add(import('@backstage/plugin-auth-backend-module-github-provider'));
-backend.add(import('@backstage/plugin-auth-backend-module-guest-provider'));
+//backend.add(import('@backstage/plugin-auth-backend-module-github-provider'));
+//backend.add(import('./auth/githubResolver'));
+backend.add(customAuth);
 
 // --------------------
 // catalog
