@@ -55,6 +55,7 @@
   },
   "packageManager": "yarn@4.4.1",
   "dependencies": {
+    "@aws-sdk/client-cloudwatch-logs": "^3.978.0",
     "@aws-sdk/client-ecr": "^3.968.0",
     "@aws-sdk/client-ecs": "^3.968.0",
     "@aws-sdk/client-elastic-load-balancing-v2": "^3.971.0",

@@ -54,6 +54,39 @@ spec:
             - properties:
                 serviceMode:
                   const: create
+                
+                commandOverride:
+                  title: Container Command (Optional)
+                  type: string
+                  description: "e.g. celery -A app.worker worker -l info (Leave empty for default)"
+
+                s3EnvBucket:
+                  title: S3 Bucket for Env Files
+                  type: string
+                  default: "dev-aviso-fargate-service-env"
+
+                s3EnvFolder:
+                  title: S3 Folder for Env Files
+                  type: string
+                  description: "e.g. user-tracker-qa-env (We will append /.env automatically)"
+
+                envFileContent:
+                  title: .env File Content
+                  type: string
+                  description: "Paste the full content of your .env file here."
+                  ui:widget: textarea
+                  ui:options:
+                    rows: 100
+                    placeholder: |
+                      # Example format:
+                      DB_HOST=localhost
+                      DB_PORT=5432
+                      API_KEY=your-secret-key  
+
+                logGroupName:
+                  title: CloudWatch Log Group Name
+                  type: string
+                  default: "/ecs/my-new-service"  
 
                 ecsCluster:
                   title: ECS Cluster
@@ -62,6 +95,12 @@ spec:
                 ecsServiceName:
                   title: ECS Service Name
                   type: string
+
+                ecsTaskDefName:
+                  title: Task Definition Family Name
+                  type: string
+                  description: "Must end with -td (e.g., my-service-td)"
+                  default: "my-service-td"  
 
                 ecrRepository:
                   title: ECR Repository Name
@@ -99,7 +138,27 @@ spec:
                   type: string
                   default: us-east-1
 
-                # 🔹 NEW: ALB toggle
+                tags:
+                  title: Resource Tags
+                  type: array
+                  description: "Tags to apply to the Service and Task Definition"
+                  items:
+                    type: object
+                    required: [key, value]
+                    properties:
+                      key:
+                        type: string
+                        title: Key
+                      value:
+                        type: string
+                        title: Value
+                  default:
+                    - key: "ManagedBy"
+                      value: "Backstage"
+                    - key: "Environment"
+                      value: "dev"  
+
+                # ALB toggle
                 enableLoadBalancer:
                   title: Expose service via Load Balancer
                   type: boolean
@@ -191,19 +250,65 @@ spec:
         repositoryName: ${{ parameters.ecrRepository }}
         region: ${{ parameters.awsRegion }}
 
+    # ---------------------------------------------------------
+    #  Create S3 Folder
+    # ---------------------------------------------------------
+    - id: create-s3-folder
+      if: ${{ parameters.serviceMode === 'create' }}
+      name: Create S3 Env Folder
+      action: aws:s3:create-folder
+      input:
+        region: ${{ parameters.awsRegion }}
+        bucketName: ${{ parameters.s3EnvBucket }}
+        folderPath: ${{ parameters.s3EnvFolder }}
+
+    - id: upload-env-file
+      if: ${{ parameters.serviceMode === 'create' }}
+      name: Create .env File in S3
+      action: aws:s3:write-file
+      input:
+        region: ${{ parameters.awsRegion }}
+        bucketName: ${{ parameters.s3EnvBucket }}
+        path: ${{ parameters.s3EnvFolder }}/.env
+        content: ${{ parameters.envFileContent }}  # <--- Passes the pasted text    
+
+    # ---------------------------------------------------------
+    #  Create Log Group
+    # ---------------------------------------------------------
+    - id: create-log-group
+      if: ${{ parameters.serviceMode === 'create' }}
+      name: Create CloudWatch Log Group
+      action: aws:cloudwatch:create-log-group
+      input:
+        region: ${{ parameters.awsRegion }}
+        logGroupName: ${{ parameters.logGroupName }}    
+
     - id: register-task-def
       if: ${{ parameters.serviceMode === 'create' }}
       name: Register ECS Task Definition
       action: aws:ecs:register-task-def
       input:
-        family: ${{ parameters.ecsServiceName }}
+        family: ${{ parameters.ecsTaskDefName }}
         containerName: ${{ parameters.containerName }}
         containerPort: ${{ parameters.containerPort }}
         image: ${{ parameters.containerImage }}
         cpu: ${{ parameters.cpu }}
         memory: ${{ parameters.memory }}
         region: ${{ parameters.awsRegion }}
-        executionRoleArn: arn:aws:iam::369521641981:role/ecsTaskExecutionRole
+        executionRoleArn: ${{ 'arn:aws:iam::369521641981:role/ecsTaskExecutionRole' if parameters.environment == 'dev' else 'arn:aws:iam::270591008196:role/ecsTaskExecutionRole' }}
+        taskRoleArn: ${{ 'arn:aws:iam::369521641981:role/ecsTaskExecutionRole' if parameters.environment == 'dev' else 'arn:aws:iam::270591008196:role/ecsTaskExecutionRole' }}
+        command: ${{ parameters.commandOverride.split(' ') if parameters.commandOverride else [] }}
+        environmentFiles:
+          - value: arn:aws:s3:::${{ parameters.s3EnvBucket }}/${{ parameters.s3EnvFolder }}/.env
+            type: s3
+        logConfiguration:
+          logDriver: awslogs
+          options:
+            awslogs-group: ${{ parameters.logGroupName }}
+            awslogs-create-group: "true"
+            awslogs-region: ${{ parameters.awsRegion }}
+            awslogs-stream-prefix: "ecs" 
+        tags: ${{ parameters.tags }}       
 
     # Create Target Group
     - id: create-target-group
@@ -225,9 +330,15 @@ spec:
       action: aws:elbv2:create-alb
       input:
         name: ${{ parameters.loadBalancerName }}
-        subnets:
-          - subnet-0e1a5c54a6d9fe52b
-          - subnet-07cc2e35a5592549c
+        subnets: ${{ [
+            'subnet-016f52b1842bd5240',
+            'subnet-02116af62b70a6337',
+            'subnet-0697eeb9e13c8a70b'
+          ] if parameters.environment == 'dev' else [
+            'subnet-ec8e64b5',
+            'subnet-3b0f0513',
+            'subnet-0d043e586ea16c604'
+          ] }}
         securityGroups: ${{ parameters.albSecurityGroups }}
         region: ${{ parameters.awsRegion }}
 
@@ -275,20 +386,30 @@ spec:
         cluster: ${{ parameters.ecsCluster }}
         serviceName: ${{ parameters.ecsServiceName }}
         region: ${{ parameters.awsRegion }}
+        taskDefinition: "arn:aws:ecs:${{ parameters.awsRegion }}:${{ '369521641981' if parameters.environment == 'dev' else '270591008196' }}:task-definition/${{ parameters.ecsTaskDefName }}"
+        subnets: ${{ [
+            'subnet-0e9d3f1ad15c0ee74',
+            'subnet-0e1a5c54a6d9fe52b',
+            'subnet-093d89d1190420ba3',
+            'subnet-04119f906b86b11ed',
+            'subnet-07cc2e35a5592549c'
+          ] if parameters.environment == 'dev' else [
+            'subnet-3c0f0514',
+            'subnet-8b795ffc',
+            'subnet-ed8e64b4'
+          ] }}
 
-        taskDefinition: arn:aws:ecs:${{ parameters.awsRegion }}:369521641981:task-definition/${{ parameters.ecsServiceName }}
-
-        subnets:
-          - subnet-0e9d3f1ad15c0ee74
-          - subnet-07cc2e35a5592549c
-
-        securityGroups:
-          - sg-0313a6e7a7b90578c
+        securityGroups: ${{ [
+            'sg-0313a6e7a7b90578c'
+          ] if parameters.environment == 'dev' else [
+            'sg-0c0a6611b141ad86d' 
+          ] }}
 
         loadBalancers:
           - targetGroupArn: ${{ steps['create-target-group'].output.targetGroupArn }}
             containerName: ${{ parameters.containerName }}
             containerPort: ${{ parameters.targetGroupPort }}
+        tags: ${{ parameters.tags }}    
 
     - id: register-service
       if: ${{ parameters.serviceMode === 'create' }}
@@ -322,11 +443,13 @@ spec:
   # OUTPUT
   ############################
   output:
+    text:
+      - title: ALB DNS Name
+        content: |
+          **${{ steps['create-alb'].output.dnsName }}**
     links:
-      - title: GitHub Repository
-        url: ${{ parameters.repoUrl }}
+      - title: Service URL
+        url: https://${{ steps['create-alb'].output.dnsName }}
       - title: Open in Backstage Catalog
         icon: catalog
         entityRef: ${{ steps['register-service'].output.entityRef }}
-      - title: Service URL
-        url: https://${{ steps['create-alb'].output.dnsName }}

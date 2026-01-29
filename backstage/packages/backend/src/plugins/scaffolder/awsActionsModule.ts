@@ -10,6 +10,11 @@ import { awsElbv2CreateTargetGroupAction } from './awsElbv2CreateTargetGroup';
 import { awsElbv2CreateAlbAction } from './awsElbv2CreateAlb';
 import { awsElbv2CreateListenerAction } from './awsElbv2CreateListener';
 
+import { awsCloudWatchCreateLogGroupAction } from './awsCloudWatchCreateLogGroup';
+import { awsS3CreateFolderAction } from './awsS3CreateFolder';
+
+import{ awsS3WriteFileAction } from './awsS3WriteFile';
+
 export const awsScaffolderActionsModule = createBackendModule({
   pluginId: 'scaffolder',
   moduleId: 'aws-actions',
@@ -29,6 +34,10 @@ export const awsScaffolderActionsModule = createBackendModule({
           awsElbv2CreateTargetGroupAction,
           awsElbv2CreateAlbAction,
           awsElbv2CreateListenerAction,
+          
+          awsCloudWatchCreateLogGroupAction,
+          awsS3CreateFolderAction,
+          awsS3WriteFileAction
         );
       },
     });

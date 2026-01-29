@@ -23,6 +23,10 @@ export const awsEcsCreateServiceAction = createTemplateAction({
             }),
           )
           .optional(),
+        tags: zImpl.array(zImpl.object({
+          key: zImpl.string(),
+          value: zImpl.string(),
+        })).optional(),  
       }).passthrough(),
   },
 
@@ -35,6 +39,7 @@ export const awsEcsCreateServiceAction = createTemplateAction({
       subnets,
       securityGroups,
       loadBalancers,
+      tags,
     } = ctx.input;
 
     if (!taskDefinition || typeof taskDefinition !== 'string') {
@@ -62,6 +67,9 @@ export const awsEcsCreateServiceAction = createTemplateAction({
           loadBalancers && loadBalancers.length > 0
             ? loadBalancers
             : undefined,
+        tags: tags,
+        enableECSManagedTags: true,
+        propagateTags: 'SERVICE',    
       }),
     );
 
